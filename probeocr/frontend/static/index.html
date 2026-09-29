@@ -1,0 +1,707 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Probe OCR</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --line: #dde1e6; --text: #1d2330;
+    --muted: #677084; --accent: #2563eb; --accent-soft: #dbe6fd;
+    --anchor: #d97706; --warn-bg: #fff4d6; --warn: #9a6400; --bad: #c2410c;
+    --edited: #e7f6ec; --stage: #e9ecf0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171c; --panel: #1c2027; --line: #2d333d; --text: #e4e7ec;
+      --muted: #8b93a3; --accent: #6b9bff; --accent-soft: #23304a;
+      --anchor: #f0a53a; --warn-bg: #3a2f14; --warn: #f3c969; --bad: #ff8b5c;
+      --edited: #183225; --stage: #0f1216;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--text);
+         font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         display: grid; grid-template-rows: auto 1fr auto; }
+  button, input, select { font: inherit; color: inherit; }
+  button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+           padding: 5px 11px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.on { background: var(--accent-soft); border-color: var(--accent); }
+  input[type=text], input[type=number], select {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+
+  header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+           padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 15px; margin: 0 10px 0 0; }
+  header .grow { flex: 1 1 260px; min-width: 0; }
+  header .sep { width: 1px; height: 24px; background: var(--line); margin: 0 4px; }
+
+  main { display: grid; grid-template-columns: 250px 1fr 300px; min-height: 0; }
+  aside, section.side { background: var(--panel); overflow: auto; min-height: 0; }
+  aside { border-right: 1px solid var(--line); }
+  section.side { border-left: 1px solid var(--line); padding: 12px; }
+  .h { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+       margin: 0 0 8px; }
+
+  aside { display: flex; flex-direction: column; }
+  #selBar { display: flex; align-items: center; gap: 4px; padding: 8px 10px;
+            border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  #selBar span { margin-right: auto; }
+  #selBar button { padding: 2px 8px; font-size: 12px; }
+  #tree { overflow: auto; flex: 1; padding: 4px 4px 10px; }
+  #tree ul { list-style: none; margin: 0; padding: 0 0 0 14px; }
+  #tree > ul { padding-left: 0; }
+  #tree li.closed > ul { display: none; }
+  #tree .row { display: flex; align-items: center; gap: 5px; padding: 3px 6px; border-radius: 5px;
+               font-size: 13px; white-space: nowrap; min-width: 0; }
+  #tree .row:hover { background: var(--bg); }
+  #tree .row input { margin: 0; flex: none; }
+  #tree .nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; cursor: pointer; flex: 1; }
+  #tree .dir > .row .nm { font-weight: 600; }
+  #tree .caret { width: 14px; flex: none; border: none; background: none; padding: 0; cursor: pointer;
+                 color: var(--muted); font-size: 10px; transition: transform .1s; }
+  #tree li.closed > .row .caret { transform: rotate(-90deg); }
+  #tree .cnt { font-size: 11px; color: var(--muted); flex: none; }
+  #tree .file.cur > .row { background: var(--accent-soft); }
+  #tree .file.off .nm { opacity: .5; }
+  #tree .tag { font-size: 10px; color: var(--anchor); border: 1px solid var(--anchor);
+               border-radius: 3px; padding: 0 3px; flex: none; }
+  #tree .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  #tree .note { font-size: 12px; color: var(--muted); padding: 8px; }
+  #stageWrap { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  #toolbar { display: flex; gap: 6px; align-items: center; padding: 8px 12px;
+             border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  #toolbar .hint { color: var(--muted); font-size: 12px; margin-left: auto; }
+  #stage { flex: 1; overflow: auto; background: var(--stage); display: grid; place-items: center;
+           padding: 16px; min-height: 0; }
+  #canvas { box-shadow: 0 1px 6px rgba(0,0,0,.25); cursor: crosshair; }
+  #empty { color: var(--muted); text-align: center; max-width: 380px; }
+
+  .probe { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-bottom: 8px; }
+  .probe.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .probe.anchor { border-color: var(--anchor); border-style: dashed; }
+  .probe .row { display: flex; gap: 6px; align-items: center; }
+  .probe .row + .row { margin-top: 6px; }
+  .probe input[type=text] { flex: 1; min-width: 0; }
+  .probe .geo { font: 11px ui-monospace, Menlo, monospace; color: var(--muted); }
+  .probe .val { margin-left: auto; font: 13px ui-monospace, Menlo, monospace; }
+  .probe .x { border: none; background: none; color: var(--muted); padding: 2px 6px; }
+  .probe .x:hover { color: var(--bad); }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+
+  footer { border-top: 1px solid var(--line); background: var(--panel); max-height: 38vh;
+           display: flex; flex-direction: column; min-height: 0; }
+  footer .bar { display: flex; gap: 8px; align-items: center; padding: 8px 14px; flex-wrap: wrap; }
+  footer .bar .status { color: var(--muted); font-size: 13px; }
+  progress { width: 160px; }
+  #tableWrap { overflow: auto; min-height: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 0; text-align: left; white-space: nowrap; }
+  th { position: sticky; top: 0; background: var(--panel); padding: 6px 8px; font-weight: 600;
+       z-index: 1; }
+  td.img { padding: 4px 8px; cursor: pointer; color: var(--accent); }
+  td.meta { padding: 4px 8px; color: var(--muted); font: 12px ui-monospace, Menlo, monospace; }
+  td input { width: 100%; min-width: 90px; border: none; background: transparent; padding: 5px 8px;
+             border-radius: 0; font: 13px ui-monospace, Menlo, monospace; }
+  td.low { background: var(--warn-bg); }
+  td.low input { color: var(--warn); }
+  td.edited { background: var(--edited); }
+  tr.cur td { box-shadow: inset 0 0 0 9999px rgba(37,99,235,.07); }
+  tr.cur td.img { font-weight: 600; }
+  .legend { font-size: 12px; color: var(--muted); display: flex; gap: 12px; margin-left: auto; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+              vertical-align: -1px; margin-right: 4px; }
+  #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+           background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 6px;
+           opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 10; }
+  #toast.show { opacity: 1; }
+
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; grid-template-rows: auto minmax(300px, 1fr) auto; }
+    aside { max-height: 130px; border-right: none; border-bottom: 1px solid var(--line); }
+    section.side { border-left: none; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Probe OCR</h1>
+  <input type="text" id="dir" class="grow" placeholder="Root folder (default: where the server was started)">
+  <button id="openDir">Open</button>
+  <span class="sep"></span>
+  <select id="layoutSel"><option value="">Saved layouts…</option></select>
+  <button id="loadLayout">Load</button>
+  <input type="text" id="layoutName" placeholder="Layout name" size="14">
+  <button id="saveLayout">Save layout</button>
+</header>
+
+<main>
+  <aside>
+    <div id="selBar"><span id="selCount">No images</span>
+      <button id="selAll">All</button><button id="selNone">None</button></div>
+    <div id="tree"></div>
+  </aside>
+
+  <div id="stageWrap">
+    <div id="toolbar">
+      <button id="toolProbe" class="on" title="Drag on the image to add a probe box">+ Probe box</button>
+      <button id="toolAnchor" title="Drag around something that is in every screenshot, e.g. a window title">+ Anchor</button>
+      <button id="setRef">Make this the reference</button>
+      <button id="testCur">Test this image</button>
+      <span class="hint" id="hint">Open a folder to begin</span>
+    </div>
+    <div id="stage">
+      <div id="empty">
+        <p><b>1.</b> Tick the screenshots to process in the tree (whole folders or single files).<br>
+           <b>2.</b> Drag boxes around each probe's number and type its column header.<br>
+           <b>3.</b> Optional: add an anchor around something every screenshot shares, so boxes follow the window if it moves.<br>
+           <b>4.</b> Run the batch, fix any highlighted cells, export CSV.</p>
+      </div>
+      <canvas id="canvas" hidden></canvas>
+    </div>
+  </div>
+
+  <section class="side">
+    <p class="h">Probes / column headers</p>
+    <div id="probes"></div>
+    <p class="h" style="margin-top:14px">Alignment anchor</p>
+    <div id="anchorPanel"></div>
+  </section>
+</main>
+
+<footer>
+  <div class="bar">
+    <button class="primary" id="runAll">Run batch</button>
+    <progress id="prog" value="0" max="1" hidden></progress>
+    <span class="status" id="status"></span>
+    <button id="exportCsv" disabled>Export CSV</button>
+    <label class="status"><input type="checkbox" id="withConf"> include confidence columns</label>
+    <span class="legend"><span><i style="background:var(--warn-bg);border:1px solid var(--warn)"></i>low confidence / empty</span>
+      <span><i style="background:var(--edited)"></i>edited</span></span>
+  </div>
+  <div id="tableWrap"><table id="results"></table></div>
+</footer>
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const LOW_CONF = 60;
+const PALETTE = ["#2563eb", "#16a34a", "#db2777", "#7c3aed", "#0891b2", "#65a30d", "#dc2626", "#0d9488"];
+
+const S = {
+  dir: "", images: [], cur: -1, ref: -1,   // images: every image in the tree, display order
+  tree: null,
+  checked: new Set(),  // images included in the batch
+  probes: [],          // {id, label, x, y, w, h, mode}
+  anchor: null,        // {x, y, w, h, search}
+  results: {},         // path -> {dx, dy, anchor_score, probes:[{label,value,raw,conf,edited}]}
+  columns: [],         // labels snapshot for the results table
+  sel: null,           // probe id or "anchor"
+  tool: "probe",
+  nextId: 1,
+  running: false,
+};
+const imgCache = new Map();
+let img = null, scale = 1;
+
+const base = (p) => p.split(/[\\/]/).pop();   // handles Windows paths too
+const colorOf = (i) => PALETTE[i % PALETTE.length];
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2200); }
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const j = await r.json();
+  if (!r.ok || j.error) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+/* ---------------- folder & image list ---------------- */
+async function openDir(dir) {
+  const j = await api("/api/tree?root=" + encodeURIComponent(dir || ""));
+  S.dir = j.root; S.tree = j.tree; S.results = {}; S.columns = [];
+  S.images = flatten(S.tree); S.checked = new Set(S.images);
+  $("dir").value = j.root;
+  if (!S.images.length) toast("No images under that folder");
+  else if (j.truncated) toast(`Showing the first ${j.count} images only; open a narrower folder`);
+  const ri = S.images.indexOf(S.refPath);
+  setRef(ri >= 0 ? ri : S.images.length ? 0 : -1);
+  buildTree(); renderTable();
+  if (S.images.length) await show(S.ref);
+  else { S.cur = -1; img = null; $("empty").hidden = false; $("canvas").hidden = true; updateHint(); }
+}
+function setRef(i) { S.ref = i; S.refPath = S.images[i]; renderFiles(); updateHint(); }
+const selected = () => S.images.filter(p => S.checked.has(p));
+
+/* ---------------- file tree ---------------- */
+// Dirs first, then images, matching the tree's display order.
+function flatten(node) {
+  if (!node) return [];
+  node.all = [];
+  node.dirs.forEach(d => node.all.push(...flatten(d)));
+  node.all.push(...node.images);
+  return node.all;
+}
+let fileEls = new Map(), dirEls = [];
+function buildTree() {
+  const t = $("tree"); t.innerHTML = ""; fileEls = new Map(); dirEls = [];
+  if (!S.tree || !S.images.length) { t.innerHTML = `<p class="note">No images found under this folder.</p>`; renderFiles(); return; }
+  const ul = document.createElement("ul");
+  ul.append(dirNode(S.tree, 0, S.images.length > 200));
+  t.append(ul);
+  renderFiles();
+}
+function dirNode(node, depth, collapseDeep) {
+  const li = document.createElement("li"); li.className = "dir";
+  if (collapseDeep && depth > 0) li.classList.add("closed");
+  const row = document.createElement("div"); row.className = "row";
+  const caret = document.createElement("button"); caret.className = "caret"; caret.textContent = "▼";
+  const cb = document.createElement("input"); cb.type = "checkbox";
+  cb.title = "Select / clear every image in this folder";
+  const nm = document.createElement("span"); nm.className = "nm";
+  nm.textContent = (depth === 0 ? base(node.path) || node.path : node.name) + "/";
+  nm.title = node.path;
+  const cnt = document.createElement("span"); cnt.className = "cnt";
+  row.append(caret, cb, nm, cnt);
+  const ul = document.createElement("ul");
+  node.dirs.forEach(d => ul.append(dirNode(d, depth + 1, collapseDeep)));
+  node.images.forEach(p => ul.append(fileNode(p)));
+  li.append(row, ul);
+  caret.onclick = nm.onclick = () => li.classList.toggle("closed");
+  cb.onchange = () => { node.all.forEach(p => cb.checked ? S.checked.add(p) : S.checked.delete(p)); selectionChanged(); };
+  dirEls.push({ node, cb, cnt });
+  return li;
+}
+function fileNode(p) {
+  const li = document.createElement("li"); li.className = "file";
+  const row = document.createElement("div"); row.className = "row";
+  const pad = document.createElement("span"); pad.style.width = "14px"; pad.style.flex = "none";
+  const cb = document.createElement("input"); cb.type = "checkbox";
+  const dot = document.createElement("span"); dot.className = "dot";
+  const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = base(p); nm.title = p;
+  const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = "REF";
+  row.append(pad, cb, dot, nm, tag); li.append(row);
+  cb.onchange = () => { cb.checked ? S.checked.add(p) : S.checked.delete(p); selectionChanged(); };
+  row.onclick = (e) => { if (e.target !== cb) show(S.images.indexOf(p)); };
+  fileEls.set(p, { li, cb, dot, tag });
+  return li;
+}
+function selectionChanged() {
+  // Before any boxes exist, keep the reference on a selected image.
+  const sel = selected();
+  if (!S.probes.length && !S.anchor && sel.length && !S.checked.has(S.images[S.ref])) {
+    setRef(S.images.indexOf(sel[0])); show(S.ref);
+  }
+  renderFiles(); renderTable();
+}
+function setAll(on) { S.checked = new Set(on ? S.images : []); selectionChanged(); }
+
+// Refresh checkbox / highlight / status state without rebuilding the tree.
+function renderFiles() {
+  fileEls.forEach((el, p) => {
+    const i = S.images.indexOf(p), r = S.results[p], on = S.checked.has(p);
+    el.cb.checked = on;
+    el.li.classList.toggle("cur", i === S.cur);
+    el.li.classList.toggle("off", !on);
+    el.tag.hidden = i !== S.ref;
+    el.dot.style.background = !r ? "transparent" : rowHasLow(r) ? "var(--warn)" : "#22c55e";
+  });
+  dirEls.forEach(({ node, cb, cnt }) => {
+    const n = node.all.reduce((k, p) => k + S.checked.has(p), 0), tot = node.all.length;
+    cb.checked = n === tot; cb.indeterminate = n > 0 && n < tot;
+    cnt.textContent = `${n}/${tot}`;
+  });
+  const n = S.checked.size;
+  $("selCount").textContent = S.images.length ? `${n} of ${S.images.length} selected` : "No images";
+  $("runAll").textContent = n ? `Run batch (${n})` : "Run batch";
+  const cur = fileEls.get(S.images[S.cur]);
+  if (cur) {
+    // Reveal the current image if its folder is collapsed.
+    for (let a = cur.li.parentElement.closest("li.dir"); a; a = a.parentElement.closest("li.dir")) a.classList.remove("closed");
+    cur.li.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function loadImage(path) {
+  if (imgCache.has(path)) return imgCache.get(path);
+  const p = new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im); im.onerror = () => rej(new Error("could not load " + base(path)));
+    im.src = "/api/image?path=" + encodeURIComponent(path);
+  });
+  imgCache.set(path, p);
+  return p;
+}
+
+async function show(i) {
+  if (i < 0 || i >= S.images.length) return;
+  S.cur = i;
+  img = await loadImage(S.images[i]);
+  $("empty").hidden = true; $("canvas").hidden = false;
+  fit(); draw(); renderFiles(); renderProbes(); updateHint(); highlightRow();
+}
+
+/* ---------------- canvas ---------------- */
+const cv = $("canvas"), ctx = cv.getContext("2d");
+function fit() {
+  if (!img) return;
+  const st = $("stage");
+  const availW = st.clientWidth - 32, availH = st.clientHeight - 32;
+  scale = Math.min(2, availW / img.width, Math.max(availH, 240) / img.height);
+  const dpr = window.devicePixelRatio || 1;
+  cv.style.width = img.width * scale + "px"; cv.style.height = img.height * scale + "px";
+  cv.width = Math.round(img.width * scale * dpr); cv.height = Math.round(img.height * scale * dpr);
+  ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+}
+window.addEventListener("resize", () => { fit(); draw(); });
+
+function offset() {
+  const r = S.results[S.images[S.cur]];
+  return r ? { dx: r.dx, dy: r.dy } : { dx: 0, dy: 0 };
+}
+
+function draw(preview) {
+  if (!img) return;
+  ctx.clearRect(0, 0, img.width, img.height);
+  ctx.drawImage(img, 0, 0);
+  const { dx, dy } = offset();
+  const res = S.results[S.images[S.cur]];
+  const lw = 1 / scale;
+
+  const box = (b, color, dashed, selected, text) => {
+    ctx.save();
+    ctx.lineWidth = (selected ? 2.5 : 1.5) * lw;
+    ctx.strokeStyle = color;
+    if (dashed) ctx.setLineDash([6 * lw, 4 * lw]);
+    ctx.fillStyle = color + "22";
+    ctx.fillRect(b.x + dx, b.y + dy, b.w, b.h);
+    ctx.strokeRect(b.x + dx, b.y + dy, b.w, b.h);
+    ctx.setLineDash([]);
+    if (selected) { ctx.fillStyle = color; const s = 8 * lw;
+      ctx.fillRect(b.x + dx + b.w - s / 2, b.y + dy + b.h - s / 2, s, s); }
+    if (text) {
+      ctx.font = `600 ${12 * lw}px -apple-system, sans-serif`;
+      const tw = ctx.measureText(text).width + 8 * lw, th = 17 * lw;
+      const ty = b.y + dy - th >= 0 ? b.y + dy - th : b.y + dy + b.h;
+      ctx.fillStyle = color; ctx.fillRect(b.x + dx, ty, tw, th);
+      ctx.fillStyle = "#fff"; ctx.fillText(text, b.x + dx + 4 * lw, ty + 12.5 * lw);
+    }
+    ctx.restore();
+  };
+
+  if (S.anchor) {
+    const a = S.anchor;
+    box(a, "#d97706", true, S.sel === "anchor", "anchor");
+    // search window
+    ctx.save(); ctx.strokeStyle = "#d9770666"; ctx.lineWidth = lw; ctx.setLineDash([2 * lw, 3 * lw]);
+    ctx.strokeRect(a.x - a.search, a.y - a.search, a.w + 2 * a.search, a.h + 2 * a.search);
+    ctx.restore();
+  }
+  S.probes.forEach((p, i) => {
+    const r = res?.probes?.[i];
+    const val = r ? (r.value || "—") : null;
+    box(p, colorOf(i), false, S.sel === p.id, (p.label || `probe ${i + 1}`) + (val !== null ? `: ${val}` : ""));
+  });
+  if (preview) box(preview, S.tool === "anchor" ? "#d97706" : "#2563eb", true, false, null);
+}
+
+/* mouse interaction: draw / move / resize */
+let drag = null;
+function toImg(e) {
+  const r = cv.getBoundingClientRect();
+  return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
+}
+function hit(pt) {
+  const { dx, dy } = offset(); const tol = 7 / scale;
+  const items = [...S.probes.map(p => ({ b: p, id: p.id }))];
+  if (S.anchor) items.push({ b: S.anchor, id: "anchor" });
+  for (const it of items.reverse()) {
+    const b = it.b, x = b.x + dx, y = b.y + dy;
+    if (Math.abs(pt.x - (x + b.w)) < tol && Math.abs(pt.y - (y + b.h)) < tol) return { ...it, mode: "resize" };
+    if (pt.x >= x && pt.x <= x + b.w && pt.y >= y && pt.y <= y + b.h) return { ...it, mode: "move" };
+  }
+  return null;
+}
+cv.addEventListener("mousedown", (e) => {
+  const pt = toImg(e); const h = hit(pt);
+  if (h) {
+    S.sel = h.id; renderProbes();
+    drag = { mode: h.mode, b: h.b, start: pt, orig: { ...h.b } };
+  } else {
+    drag = { mode: "new", start: pt };
+  }
+  draw();
+});
+window.addEventListener("mousemove", (e) => {
+  if (!img) return;
+  const pt = toImg(e);
+  if (!drag) { const h = hit(pt); cv.style.cursor = h ? (h.mode === "resize" ? "nwse-resize" : "move") : "crosshair"; return; }
+  const ddx = pt.x - drag.start.x, ddy = pt.y - drag.start.y;
+  if (drag.mode === "move") { drag.b.x = Math.round(drag.orig.x + ddx); drag.b.y = Math.round(drag.orig.y + ddy); draw(); }
+  else if (drag.mode === "resize") { drag.b.w = Math.max(6, Math.round(drag.orig.w + ddx)); drag.b.h = Math.max(6, Math.round(drag.orig.h + ddy)); draw(); }
+  else draw(rectFrom(drag.start, pt));
+});
+window.addEventListener("mouseup", (e) => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (d.mode !== "new") { invalidate(); renderProbes(); draw(); return; }
+  const r = rectFrom(d.start, toImg(e));
+  if (r.w < 6 || r.h < 6) { S.sel = null; renderProbes(); draw(); return; }
+  const { dx, dy } = offset();   // store in reference coordinates
+  r.x -= dx; r.y -= dy;
+  if (S.tool === "anchor") {
+    S.anchor = { ...r, search: S.anchor?.search ?? 30 }; S.sel = "anchor";
+    setTool("probe");
+  } else {
+    const p = { id: S.nextId++, label: "", mode: "num", ...r };
+    S.probes.push(p); S.sel = p.id;
+  }
+  invalidate(); renderProbes(); draw();
+  if (S.sel !== "anchor") document.querySelector(`.probe[data-id="${S.sel}"] input[type=text]`)?.focus();
+});
+function rectFrom(a, b) {
+  const x = Math.round(Math.min(a.x, b.x)), y = Math.round(Math.min(a.y, b.y));
+  return { x, y, w: Math.round(Math.abs(b.x - a.x)), h: Math.round(Math.abs(b.y - a.y)) };
+}
+window.addEventListener("keydown", (e) => {
+  if (e.target.matches("input, select, textarea") || S.sel === null) return;
+  const b = S.sel === "anchor" ? S.anchor : S.probes.find(p => p.id === S.sel);
+  if (!b) return;
+  const step = e.shiftKey ? 10 : 1;
+  const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+  if (moves[e.key]) { b.x += moves[e.key][0]; b.y += moves[e.key][1]; e.preventDefault(); }
+  else if (e.key === "Delete" || e.key === "Backspace") { removeSel(); e.preventDefault(); }
+  else return;
+  invalidate(); renderProbes(); draw();
+});
+function removeSel() {
+  if (S.sel === "anchor") S.anchor = null; else S.probes = S.probes.filter(p => p.id !== S.sel);
+  S.sel = null; invalidate();
+}
+// Geometry changed: per-image offsets and values are stale.
+function invalidate() { if (Object.keys(S.results).length) { S.results = {}; renderTable(); renderFiles(); } }
+
+/* ---------------- side panel ---------------- */
+function renderProbes() {
+  const wrap = $("probes"); wrap.innerHTML = "";
+  const res = S.results[S.images[S.cur]];
+  if (!S.probes.length) wrap.innerHTML = `<p class="status" style="color:var(--muted)">No probes yet — drag a box over a reading on the image.</p>`;
+  S.probes.forEach((p, i) => {
+    const r = res?.probes?.[i];
+    const d = document.createElement("div");
+    d.className = "probe" + (S.sel === p.id ? " sel" : ""); d.dataset.id = p.id;
+    d.innerHTML = `
+      <div class="row"><span class="swatch" style="background:${colorOf(i)}"></span>
+        <input type="text" placeholder="Column header (e.g. Temp °C)">
+        <button class="x" title="Remove">✕</button></div>
+      <div class="row"><select><option value="num">Number</option><option value="text">Text</option></select>
+        <span class="geo">${p.x},${p.y} ${p.w}×${p.h}</span>
+        <span class="val"></span></div>`;
+    const [lbl] = d.querySelectorAll("input"), sel = d.querySelector("select");
+    lbl.value = p.label; sel.value = p.mode;
+    if (r) { const v = d.querySelector(".val"); v.textContent = r.value || "—";
+      v.title = `raw: "${r.raw}"  conf: ${r.conf}`; if (r.conf < LOW_CONF) v.style.color = "var(--warn)"; }
+    lbl.oninput = () => { p.label = lbl.value; draw(); };
+    lbl.onchange = () => { renderTable(); };
+    sel.onchange = () => { p.mode = sel.value; invalidate(); };
+    d.querySelector(".x").onclick = (e) => { e.stopPropagation(); S.sel = p.id; removeSel(); renderProbes(); draw(); };
+    d.onmousedown = (e) => { if (S.sel !== p.id) { S.sel = p.id; draw();
+      wrap.querySelectorAll(".probe").forEach(x => x.classList.toggle("sel", x === d)); } };
+    wrap.append(d);
+  });
+
+  const ap = $("anchorPanel"); ap.innerHTML = "";
+  if (!S.anchor) {
+    ap.innerHTML = `<p class="status" style="color:var(--muted)">None. If screenshots don't all line up exactly, click <b>+ Anchor</b> and drag around something every screenshot shares, like a window title bar or a fixed label.</p>`;
+  } else {
+    const a = S.anchor, r = res;
+    const d = document.createElement("div");
+    d.className = "probe anchor" + (S.sel === "anchor" ? " sel" : "");
+    d.innerHTML = `
+      <div class="row"><span class="swatch" style="background:var(--anchor)"></span>
+        <span>Search ±</span><input type="number" min="2" max="400" style="width:70px"> <span>px</span>
+        <button class="x" title="Remove" style="margin-left:auto">✕</button></div>
+      <div class="row"><span class="geo">${a.x},${a.y} ${a.w}×${a.h}</span>
+        <span class="val">${r ? `shift ${r.dx},${r.dy} · match ${(r.anchor_score * 100).toFixed(0)}%` : ""}</span></div>`;
+    const n = d.querySelector("input"); n.value = a.search;
+    n.onchange = () => { a.search = Math.max(2, +n.value || 30); invalidate(); draw(); };
+    if (r && r.anchor_score < 0.7) d.querySelector(".val").style.color = "var(--warn)";
+    d.querySelector(".x").onclick = () => { S.sel = "anchor"; removeSel(); renderProbes(); draw(); };
+    d.onmousedown = () => { S.sel = "anchor"; draw(); };
+    ap.append(d);
+  }
+}
+
+function setTool(t) { S.tool = t; $("toolProbe").classList.toggle("on", t === "probe");
+  $("toolAnchor").classList.toggle("on", t === "anchor"); updateHint(); }
+function updateHint() {
+  const h = $("hint");
+  if (S.cur < 0) { h.textContent = "Open a folder to begin"; return; }
+  const parts = [`${S.cur + 1} / ${S.images.length}`];
+  if (S.cur !== S.ref) parts.push("not the reference; boxes shown at detected shift");
+  if (S.tool === "anchor") parts.push("drag to place the anchor");
+  else parts.push("drag = new box · arrows nudge · ⌫ delete");
+  h.textContent = parts.join(" · ");
+}
+
+/* ---------------- running ---------------- */
+function layoutJSON() {
+  return { dir: S.dir, ref: S.images[S.ref] || S.refPath || "", anchor: S.anchor,
+           probes: S.probes.map(({ label, x, y, w, h, mode }) => ({ label, x, y, w, h, mode })) };
+}
+
+async function run(paths) {
+  if (!S.probes.length) { toast("Draw at least one probe box first"); return; }
+  if (S.running) return;
+  S.running = true; setBusy(true);
+  S.columns = S.probes.map((p, i) => p.label || `probe${i + 1}`);
+  const prog = $("prog"); prog.hidden = false; prog.max = paths.length; prog.value = 0;
+  $("status").textContent = `Processing 0 / ${paths.length}…`;
+  const t0 = performance.now();
+  try {
+    const resp = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ layout: layoutJSON(), images: paths }) });
+    if (!resp.ok) { const j = await resp.json().catch(() => ({})); throw new Error(j.error || resp.statusText); }
+    const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = "", n = 0;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let k;
+      while ((k = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, k); buf = buf.slice(k + 1);
+        if (!line.trim()) continue;
+        const r = JSON.parse(line);
+        if (r.fatal) throw new Error(r.fatal);
+        S.results[r.image] = r.ok ? r : { dx: 0, dy: 0, anchor_score: 0, error: r.error, probes: [] };
+        prog.value = ++n;
+        $("status").textContent = `Processing ${n} / ${paths.length}…`;
+        if (n % 10 === 0 || n === paths.length) renderTable();
+      }
+    }
+    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    const low = paths.filter(p => rowHasLow(S.results[p])).length;
+    $("status").textContent = `${paths.length} image${paths.length > 1 ? "s" : ""} in ${secs}s` + (low ? ` · ${low} need review` : " · all confident");
+  } catch (err) {
+    $("status").textContent = "Error: " + err.message; toast(err.message);
+  } finally {
+    S.running = false; setBusy(false); prog.hidden = true;
+    renderTable(); renderFiles(); renderProbes(); draw();
+  }
+}
+function setBusy(b) { ["runAll", "testCur"].forEach(id => $(id).disabled = b); }
+
+/* ---------------- results table ---------------- */
+function rowHasLow(r) { return !r || r.error || r.probes.some(p => !p.edited && (p.conf < LOW_CONF || !p.value)); }
+
+function renderTable() {
+  const t = $("results"); t.innerHTML = "";
+  const rows = selected().filter(p => S.results[p]);
+  $("exportCsv").disabled = !rows.length;
+  if (!rows.length) return;
+  const head = t.createTHead().insertRow();
+  ["Image", "Shift"].concat(S.columns).forEach(h => { const th = document.createElement("th"); th.textContent = h; head.append(th); });
+  const body = t.createTBody();
+  rows.forEach(path => {
+    const r = S.results[path], tr = body.insertRow(); tr.dataset.path = path;
+    const c0 = tr.insertCell(); c0.className = "img"; c0.textContent = base(path);
+    c0.onclick = () => show(S.images.indexOf(path));
+    const c1 = tr.insertCell(); c1.className = "meta";
+    c1.textContent = r.error ? r.error : `${r.dx},${r.dy}`;
+    if (!r.error && S.anchor && r.anchor_score < 0.7) { c1.classList.add("low"); c1.title = "weak anchor match — check alignment"; }
+    S.columns.forEach((_, j) => {
+      const pr = r.probes[j]; const td = tr.insertCell();
+      const inp = document.createElement("input"); inp.value = pr?.value ?? "";
+      if (pr) { inp.title = `raw OCR: "${pr.raw}"  confidence: ${pr.conf}`;
+        td.className = pr.edited ? "edited" : (pr.conf < LOW_CONF || !pr.value) ? "low" : ""; }
+      inp.onfocus = () => { if (S.images[S.cur] !== path) show(S.images.indexOf(path)); };
+      inp.onchange = () => { if (pr) { pr.value = inp.value.trim(); pr.edited = true; td.className = "edited"; renderFiles(); } };
+      td.append(inp);
+    });
+  });
+  highlightRow();
+}
+function highlightRow() {
+  document.querySelectorAll("#results tbody tr").forEach(tr => {
+    const on = tr.dataset.path === S.images[S.cur]; tr.classList.toggle("cur", on);
+    if (on) tr.scrollIntoView({ block: "nearest" });
+  });
+}
+
+function exportCsv() {
+  const withConf = $("withConf").checked;
+  const esc = (v) => /[",\n\r]/.test(v) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
+  const header = ["image"];
+  S.columns.forEach(c => { header.push(c); if (withConf) header.push(c + " (conf)"); });
+  const lines = [header.map(esc).join(",")];
+  selected().filter(p => S.results[p]).forEach(p => {
+    const r = S.results[p], row = [base(p)];
+    S.columns.forEach((_, j) => { const pr = r.probes[j];
+      row.push(pr?.value ?? ""); if (withConf) row.push(pr ? (pr.edited ? "edited" : pr.conf) : ""); });
+    lines.push(row.map(esc).join(","));
+  });
+  const blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = ($("layoutName").value.trim() || base(S.dir) || "probe_readings") + ".csv";
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+/* ---------------- layouts ---------------- */
+async function refreshLayouts() {
+  const j = await api("/api/layouts"); const sel = $("layoutSel");
+  sel.innerHTML = `<option value="">Saved layouts…</option>` + j.layouts.map(n => `<option>${n.replace(/</g, "&lt;")}</option>`).join("");
+}
+async function saveLayout() {
+  const name = $("layoutName").value.trim();
+  if (!name) { toast("Give the layout a name"); $("layoutName").focus(); return; }
+  await api("/api/layout", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, layout: layoutJSON() }) });
+  await refreshLayouts(); $("layoutSel").value = name; toast(`Saved layout “${name}”`);
+}
+async function loadLayout() {
+  const name = $("layoutSel").value; if (!name) return;
+  const L = await api("/api/layout?name=" + encodeURIComponent(name));
+  S.probes = L.probes.map(p => ({ id: S.nextId++, ...p })); S.anchor = L.anchor || null; S.sel = null;
+  S.refPath = L.ref; $("layoutName").value = name;
+  if (L.dir && L.dir !== S.dir && !S.images.includes(L.ref)) await openDir(L.dir);
+  const ri = S.images.indexOf(L.ref);
+  if (ri >= 0) setRef(ri);
+  else if (S.anchor) toast("Reference image from this layout isn't in the open folder; the current reference will be used for the anchor");
+  invalidate(); renderProbes(); if (S.images.length) await show(S.ref >= 0 ? S.ref : 0);
+}
+
+/* ---------------- wiring ---------------- */
+$("openDir").onclick = () => openDir($("dir").value.trim()).catch(e => toast(e.message));
+$("dir").onkeydown = (e) => { if (e.key === "Enter") $("openDir").click(); };
+$("toolProbe").onclick = () => setTool("probe");
+$("toolAnchor").onclick = () => setTool(S.tool === "anchor" ? "probe" : "anchor");
+$("setRef").onclick = () => {
+  if (S.cur < 0 || S.cur === S.ref) return;
+  // Keep boxes where they appear on this image.
+  const { dx, dy } = offset();
+  [...S.probes, ...(S.anchor ? [S.anchor] : [])].forEach(b => { b.x += dx; b.y += dy; });
+  setRef(S.cur); invalidate(); renderProbes(); draw();
+  toast("Reference changed; boxes kept where they appear on this image");
+};
+$("testCur").onclick = () => S.cur >= 0 && run([S.images[S.cur]]);
+$("runAll").onclick = () => S.checked.size ? run(selected()) : toast("Tick at least one image in the tree");
+$("selAll").onclick = () => setAll(true);
+$("selNone").onclick = () => setAll(false);
+$("exportCsv").onclick = exportCsv;
+$("saveLayout").onclick = () => saveLayout().catch(e => toast(e.message));
+$("loadLayout").onclick = () => loadLayout().catch(e => toast(e.message));
+document.addEventListener("keydown", (e) => {
+  if (e.target.matches("input, select, textarea")) return;
+  if (e.key === "]" || e.key === "PageDown") show(S.cur + 1);
+  if (e.key === "[" || e.key === "PageUp") show(S.cur - 1);
+});
+refreshLayouts().catch(() => {});
+renderProbes();
+openDir("").catch(e => toast(e.message));
+</script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+# Builds the self-contained Windows bundle and proves it works on a clean
+# Windows shell (no MSYS2 on PATH) before publishing it as a downloadable artifact.
+name: probeocr Windows bundle
+
+on:
+  push:
+    paths: ["probeocr/**", ".github/workflows/probeocr-windows.yml"]
+  workflow_dispatch:
+
+jobs:
+  bundle:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: make zip unzip
+          pacboy: gcc:p pkgconf:p tesseract-ocr:p leptonica:p
+
+      - name: Build bundle
+        shell: msys2 {0}
+        run: bash probeocr/packaging/windows/bundle.sh
+
+      - name: Smoke test the bundle with its own Python, outside MSYS2
+        shell: pwsh
+        run: |
+          $b = "probeocr\dist\probeocr-win64"
+          & "$b\python\python.exe" "$b\tools\smoke_test.py" $b
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probeocr-win64
+          path: probeocr/dist/probeocr-win64.zip

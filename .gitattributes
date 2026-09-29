@@ -1,0 +1,5 @@
+# Keep shell scripts LF even on Windows checkouts (bash rejects CRLF); batch files CRLF.
+*.sh  text eol=lf
+*.py  text eol=lf
+*.bat text eol=crlf
+*.png binary
