@@ -77,9 +77,12 @@
   #toolbar { display: flex; gap: 6px; align-items: center; padding: 8px 12px;
              border-bottom: 1px solid var(--line); flex-wrap: wrap; }
   #toolbar .hint { color: var(--muted); font-size: 12px; margin-left: auto; }
-  #stage { flex: 1; overflow: auto; background: var(--stage); display: grid; place-items: center;
-           padding: 16px; min-height: 0; }
-  #canvas { box-shadow: 0 1px 6px rgba(0,0,0,.25); cursor: crosshair; }
+  #stage { flex: 1; overflow: hidden; background: var(--stage); display: grid; place-items: center;
+           min-height: 0; position: relative; }
+  #canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+  #zoom { display: flex; align-items: center; gap: 2px; }
+  #zoom button { padding: 3px 8px; min-width: 30px; }
+  #zoomPct { min-width: 56px; font-variant-numeric: tabular-nums; }
   #empty { color: var(--muted); text-align: center; max-width: 380px; }
 
   .probe { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-bottom: 8px; }
@@ -153,6 +156,12 @@
       <button id="toolAnchor" title="Drag around something that is in every screenshot, e.g. a window title">+ Anchor</button>
       <button id="setRef">Make this the reference</button>
       <button id="testCur">Test this image</button>
+      <span id="zoom">
+        <button id="zoomOut" title="Zoom out (−)">−</button>
+        <button id="zoomPct" title="Actual pixels (1)">100%</button>
+        <button id="zoomIn" title="Zoom in (+)">+</button>
+        <button id="zoomFit" title="Fit to view (0)">Fit</button>
+      </span>
       <span class="hint" id="hint">Open a folder to begin</span>
     </div>
     <div id="stage">
@@ -207,7 +216,10 @@ const S = {
   running: false,
 };
 const imgCache = new Map();
-let img = null, scale = 1;
+let img = null;
+// View transform: screen = pan + image * scale (CSS pixels, relative to the canvas).
+let scale = 1, panX = 0, panY = 0, fitMode = true, spaceDown = false, viewW = 0, viewH = 0;
+const MIN_ZOOM = 0.05, MAX_ZOOM = 32;
 
 const base = (p) => p.split(/[\\/]/).pop();   // handles Windows paths too
 const colorOf = (i) => PALETTE[i % PALETTE.length];
@@ -340,24 +352,48 @@ function loadImage(path) {
 async function show(i) {
   if (i < 0 || i >= S.images.length) return;
   S.cur = i;
+  const prev = img;
   img = await loadImage(S.images[i]);
   $("empty").hidden = true; $("canvas").hidden = false;
-  fit(); draw(); renderFiles(); renderProbes(); updateHint(); highlightRow();
+  resizeCanvas();
+  // Keep zoom/pan across same-sized screenshots so the same probe stays in view.
+  if (fitMode || !prev || prev.width !== img.width || prev.height !== img.height) fit();
+  draw(); renderFiles(); renderProbes(); updateHint(); highlightRow();
 }
 
 /* ---------------- canvas ---------------- */
 const cv = $("canvas"), ctx = cv.getContext("2d");
+// The canvas always matches the stage; zooming changes the transform, not the
+// canvas size, so large screenshots can be magnified without hitting canvas limits.
+function resizeCanvas() {
+  const st = $("stage"), dpr = window.devicePixelRatio || 1;
+  viewW = st.clientWidth; viewH = st.clientHeight;
+  cv.width = Math.round(viewW * dpr); cv.height = Math.round(viewH * dpr);
+}
 function fit() {
   if (!img) return;
-  const st = $("stage");
-  const availW = st.clientWidth - 32, availH = st.clientHeight - 32;
-  scale = Math.min(2, availW / img.width, Math.max(availH, 240) / img.height);
-  const dpr = window.devicePixelRatio || 1;
-  cv.style.width = img.width * scale + "px"; cv.style.height = img.height * scale + "px";
-  cv.width = Math.round(img.width * scale * dpr); cv.height = Math.round(img.height * scale * dpr);
-  ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+  scale = Math.min(2, (viewW - 32) / img.width, (viewH - 32) / img.height);
+  panX = (viewW - img.width * scale) / 2; panY = (viewH - img.height * scale) / 2;
+  fitMode = true; updateZoomLabel();
 }
-window.addEventListener("resize", () => { fit(); draw(); });
+function setZoom(z, cx = viewW / 2, cy = viewH / 2) {
+  if (!img) return;
+  z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+  const ix = (cx - panX) / scale, iy = (cy - panY) / scale;   // image point under the cursor stays put
+  scale = z; panX = cx - ix * z; panY = cy - iy * z;
+  fitMode = false; clampPan(); updateZoomLabel(); draw();
+}
+function panBy(dx, dy) { panX += dx; panY += dy; fitMode = false; clampPan(); draw(); }
+function clampPan() {   // keep at least a sliver of the image on screen
+  const m = 60, w = img.width * scale, h = img.height * scale;
+  panX = Math.min(viewW - m, Math.max(m - w, panX));
+  panY = Math.min(viewH - m, Math.max(m - h, panY));
+}
+function updateZoomLabel() { $("zoomPct").textContent = Math.round(scale * 100) + "%"; }
+window.addEventListener("resize", () => {
+  if (!img) return;
+  resizeCanvas(); if (fitMode) fit(); else clampPan(); draw();
+});
 
 function offset() {
   const r = S.results[S.images[S.cur]];
@@ -366,8 +402,14 @@ function offset() {
 
 function draw(preview) {
   if (!img) return;
-  ctx.clearRect(0, 0, img.width, img.height);
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, viewW, viewH);
+  ctx.setTransform(scale * dpr, 0, 0, scale * dpr, panX * dpr, panY * dpr);
+  ctx.imageSmoothingEnabled = scale < 2;   // show crisp pixels when zoomed in
   ctx.drawImage(img, 0, 0);
+  ctx.strokeStyle = "rgba(0,0,0,.35)"; ctx.lineWidth = 1 / scale;
+  ctx.strokeRect(0, 0, img.width, img.height);
   const { dx, dy } = offset();
   const res = S.results[S.images[S.cur]];
   const lw = 1 / scale;
@@ -413,7 +455,7 @@ function draw(preview) {
 let drag = null;
 function toImg(e) {
   const r = cv.getBoundingClientRect();
-  return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
+  return { x: (e.clientX - r.left - panX) / scale, y: (e.clientY - r.top - panY) / scale };
 }
 function hit(pt) {
   const { dx, dy } = offset(); const tol = 7 / scale;
@@ -427,6 +469,12 @@ function hit(pt) {
   return null;
 }
 cv.addEventListener("mousedown", (e) => {
+  if (e.button === 1 || (e.button === 0 && spaceDown)) {   // middle-drag or Space+drag pans
+    e.preventDefault();
+    drag = { mode: "pan", sx: e.clientX, sy: e.clientY, px: panX, py: panY };
+    cv.style.cursor = "grabbing"; return;
+  }
+  if (e.button !== 0) return;
   const pt = toImg(e); const h = hit(pt);
   if (h) {
     S.sel = h.id; renderProbes();
@@ -438,7 +486,12 @@ cv.addEventListener("mousedown", (e) => {
 });
 window.addEventListener("mousemove", (e) => {
   if (!img) return;
+  if (drag?.mode === "pan") {
+    panX = drag.px + e.clientX - drag.sx; panY = drag.py + e.clientY - drag.sy;
+    fitMode = false; clampPan(); draw(); return;
+  }
   const pt = toImg(e);
+  if (!drag && spaceDown) { cv.style.cursor = "grab"; return; }
   if (!drag) { const h = hit(pt); cv.style.cursor = h ? (h.mode === "resize" ? "nwse-resize" : "move") : "crosshair"; return; }
   const ddx = pt.x - drag.start.x, ddy = pt.y - drag.start.y;
   if (drag.mode === "move") { drag.b.x = Math.round(drag.orig.x + ddx); drag.b.y = Math.round(drag.orig.y + ddy); draw(); }
@@ -448,6 +501,7 @@ window.addEventListener("mousemove", (e) => {
 window.addEventListener("mouseup", (e) => {
   if (!drag) return;
   const d = drag; drag = null;
+  if (d.mode === "pan") { cv.style.cursor = spaceDown ? "grab" : "crosshair"; return; }
   if (d.mode !== "new") { invalidate(); renderProbes(); draw(); return; }
   const r = rectFrom(d.start, toImg(e));
   if (r.w < 6 || r.h < 6) { S.sel = null; renderProbes(); draw(); return; }
@@ -463,6 +517,34 @@ window.addEventListener("mouseup", (e) => {
   invalidate(); renderProbes(); draw();
   if (S.sel !== "anchor") document.querySelector(`.probe[data-id="${S.sel}"] input[type=text]`)?.focus();
 });
+// Ctrl/⌘ + wheel (and trackpad pinch, which arrives as ctrl+wheel) zooms at the
+// cursor; plain wheel / two-finger scroll pans.
+cv.addEventListener("wheel", (e) => {
+  if (!img) return;
+  e.preventDefault();
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? viewH : 1;
+  const dx = e.deltaX * unit, dy = e.deltaY * unit;
+  if (e.ctrlKey || e.metaKey) {
+    const r = cv.getBoundingClientRect();
+    setZoom(scale * Math.exp(-Math.max(-100, Math.min(100, dy)) * 0.004), e.clientX - r.left, e.clientY - r.top);
+  } else if (e.shiftKey && !dx) panBy(-dy, 0);
+  else panBy(-dx, -dy);
+}, { passive: false });
+const ZOOM_STEP = 1.25;
+$("zoomIn").onclick = () => setZoom(scale * ZOOM_STEP);
+$("zoomOut").onclick = () => setZoom(scale / ZOOM_STEP);
+$("zoomPct").onclick = () => setZoom(1);
+$("zoomFit").onclick = () => { if (img) { fit(); draw(); } };
+window.addEventListener("keydown", (e) => {
+  if (e.code !== "Space" || e.target.matches("input, select, textarea")) return;
+  e.preventDefault();   // don't scroll the page or press a focused button
+  if (!spaceDown) { spaceDown = true; if (!drag) cv.style.cursor = "grab"; }
+});
+window.addEventListener("keyup", (e) => {
+  if (e.code === "Space") { spaceDown = false; if (!drag) cv.style.cursor = "crosshair"; }
+});
+window.addEventListener("blur", () => { spaceDown = false; });
+
 function rectFrom(a, b) {
   const x = Math.round(Math.min(a.x, b.x)), y = Math.round(Math.min(a.y, b.y));
   return { x, y, w: Math.round(Math.abs(b.x - a.x)), h: Math.round(Math.abs(b.y - a.y)) };
@@ -544,7 +626,7 @@ function updateHint() {
   const parts = [`${S.cur + 1} / ${S.images.length}`];
   if (S.cur !== S.ref) parts.push("not the reference; boxes shown at detected shift");
   if (S.tool === "anchor") parts.push("drag to place the anchor");
-  else parts.push("drag = new box · arrows nudge · ⌫ delete");
+  else parts.push("drag = new box · ⌘/Ctrl+scroll = zoom · scroll or Space+drag = pan");
   h.textContent = parts.join(" · ");
 }
 
@@ -698,6 +780,11 @@ document.addEventListener("keydown", (e) => {
   if (e.target.matches("input, select, textarea")) return;
   if (e.key === "]" || e.key === "PageDown") show(S.cur + 1);
   if (e.key === "[" || e.key === "PageUp") show(S.cur - 1);
+  if (e.metaKey || e.ctrlKey || e.altKey) return;   // leave browser zoom shortcuts alone
+  if (e.key === "+" || e.key === "=") setZoom(scale * ZOOM_STEP);
+  if (e.key === "-" || e.key === "_") setZoom(scale / ZOOM_STEP);
+  if (e.key === "0" && img) { fit(); draw(); }
+  if (e.key === "1") setZoom(1);
 });
 refreshLayouts().catch(() => {});
 renderProbes();

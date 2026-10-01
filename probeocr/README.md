@@ -35,7 +35,14 @@ python3 frontend/server.py --root ~/runs    # or any other folder
 
 Hidden folders, `node_modules`, `__pycache__` and virtualenvs are skipped; the tree shows at most 5000 images.
 
-Keys: `[` / `]` switch images, arrows nudge the selected box (Shift = 10 px), ⌫ deletes it.
+**Zoom & pan** (for large screenshots): ⌘/Ctrl + scroll or trackpad pinch zooms around the
+cursor (5%–3200%), and the − / % / + / Fit buttons in the toolbar do the same. Scroll,
+Space + drag, or middle-button drag pans. Above 200%, pixels are drawn as sharp squares so
+box edges can be placed exactly. Zoom and position are kept when switching between
+screenshots of the same size, so you can step through a batch looking at the same probe.
+
+Keys: `[` / `]` switch images, `+` / `-` zoom, `0` fit, `1` actual pixels, arrows nudge the
+selected box (Shift = 10 px), ⌫ deletes it.
 
 ## CLI
 
