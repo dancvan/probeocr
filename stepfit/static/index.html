@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>stepfit</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --line: #dde1e6; --text: #1d2330; --muted: #677084;
+    --accent: #2563eb; --accent-soft: #dbe6fd; --warn-bg: #fff4d6; --warn: #9a6400;
+    --bad: #c2410c; --good: #15803d; --grid: #e8ebef;
+    --c-meas: #2563eb; --c-model: #d97706; --c-noise: #8b93a3; --c-in: #15803d; --c-err: #9333ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171c; --panel: #1c2027; --line: #2d333d; --text: #e4e7ec; --muted: #8b93a3;
+      --accent: #6b9bff; --accent-soft: #23304a; --warn-bg: #3a2f14; --warn: #f3c969;
+      --bad: #ff8b5c; --good: #4ade80; --grid: #262c35;
+      --c-meas: #6b9bff; --c-model: #f0a53a; --c-noise: #7b8494; --c-in: #4ade80; --c-err: #c084fc;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--text);
+         font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         display: grid; grid-template-columns: 330px 1fr; }
+  button, input, select { font: inherit; color: inherit; }
+  button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+           padding: 5px 11px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  input[type=text], select { background: var(--panel); border: 1px solid var(--line);
+           border-radius: 6px; padding: 5px 8px; width: 100%; min-width: 0; }
+  input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+
+  aside { background: var(--panel); border-right: 1px solid var(--line); overflow: auto;
+          padding: 14px; height: 100vh; position: sticky; top: 0; }
+  aside h1 { font-size: 16px; margin: 0 0 2px; }
+  aside .sub { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+  .h { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+       margin: 18px 0 8px; }
+  .row { display: grid; grid-template-columns: 92px 1fr; gap: 6px 8px; align-items: center;
+         margin-bottom: 6px; }
+  .row label { color: var(--muted); font-size: 13px; }
+  .row.two { grid-template-columns: 92px 1fr 1fr; }
+  .btns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  details { margin: 6px 0; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .check { display: flex; gap: 8px; align-items: center; margin: 6px 0; font-size: 13px; }
+  #err { color: var(--bad); font-size: 13px; margin-top: 10px; white-space: pre-wrap; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+  main { padding: 14px; display: grid; gap: 14px; align-content: start; min-width: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+          padding: 12px 14px; min-width: 0; }
+  .card h2 { font-size: 13px; margin: 0 0 8px; display: flex; gap: 10px; align-items: baseline; }
+  .card h2 small { color: var(--muted); font-weight: normal; }
+  .plot { position: relative; width: 100%; height: 250px; }
+  .plot.tall { height: 300px; }
+  .plot canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line);
+         border-radius: 6px; padding: 4px 8px; font-size: 12px; white-space: pre; display: none;
+         box-shadow: 0 2px 8px #0003; z-index: 2; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted);
+            margin-bottom: 4px; }
+  .legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px;
+              vertical-align: middle; margin-right: 5px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; }
+  .empty { color: var(--muted); padding: 30px 0; text-align: center; }
+  .stats { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-bottom: 10px; }
+  .stat b { display: block; font-size: 17px; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  table { border-collapse: collapse; font-size: 13px; width: 100%; }
+  th, td { text-align: left; padding: 3px 12px 3px 0; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  td.n { font-variant-numeric: tabular-nums; }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px;
+        overflow: auto; font-size: 12.5px; margin: 8px 0; }
+  .warn { background: var(--warn-bg); color: var(--warn); border-radius: 6px; padding: 6px 10px;
+          margin: 4px 0; font-size: 13px; }
+  .ok { color: var(--good); } .bad { color: var(--bad); }
+  .note { color: var(--muted); font-size: 12px; margin: 2px 0; }
+  .chk { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 2px 18px;
+         font-size: 13px; margin: 8px 0; }
+  @media (max-width: 860px) { body { grid-template-columns: 1fr; } aside { position: static; height: auto; } }
+</style>
+</head>
+<body>
+<aside>
+  <h1>stepfit</h1>
+  <div class="sub">Step response &rarr; transfer function &rarr; stable zpk model</div>
+
+  <div class="h">1 &middot; Data</div>
+  <div class="btns" style="margin-top:0">
+    <button class="primary" id="btnFile">Choose CSV&hellip;</button>
+    <button id="btnDemo">Try demo data</button>
+    <input type="file" id="file" accept=".csv,.txt,.dat,.tsv,text/*" hidden>
+  </div>
+  <div class="hint" id="fname">Any delimited text file: comma, tab, semicolon or spaces; a header row is optional.</div>
+
+  <div class="h">2 &middot; Columns</div>
+  <div class="row"><label>Time</label><select id="selT"></select></div>
+  <div class="row" id="rowDt" hidden><label>Sample step</label><input type="text" id="dt" placeholder="seconds"></div>
+  <div class="row"><label>Input (step)</label><select id="selU"></select></div>
+  <div class="row"><label>Output</label><select id="selY"></select></div>
+  <div class="row"><label>Method</label>
+    <select id="mode">
+      <option value="ideal">Ideal step (amplitude from input)</option>
+      <option value="measured">Measured input (divide spectra)</option>
+    </select></div>
+  <details><summary>Overrides</summary>
+    <div class="row" style="margin-top:8px"><label>Amplitude</label><input type="text" id="amp" placeholder="auto"></div>
+    <div class="row"><label>Step time</label><input type="text" id="stepT" placeholder="auto (s, as in file)"></div>
+  </details>
+  <div class="btns"><button class="primary" id="btnAnalyze" disabled>Estimate transfer function</button></div>
+
+  <div class="h">3 &middot; Fit</div>
+  <div class="row two"><label>Range (Hz)</label><input type="text" id="fLo" placeholder="low"><input type="text" id="fHi" placeholder="high"></div>
+  <div class="hint">Type a range, or drag across the magnitude plot.</div>
+  <div class="row two" style="margin-top:8px"><label>Poles / zeros</label><input type="text" id="nP" placeholder="auto"><input type="text" id="nZ" placeholder="auto"></div>
+  <details><summary>Stability &amp; search options</summary>
+    <div class="row" style="margin-top:8px"><label>Max poles</label><input type="text" id="maxP" value="6"></div>
+    <div class="row"><label>Guard band</label><input type="text" id="guard" value="10"></div>
+    <div class="hint" style="margin:-2px 0 8px">Poles and zeros are confined to [low/guard, high&times;guard], so nothing sits at DC or rings far outside the fit.</div>
+    <div class="row"><label>Roll-off</label><input type="text" id="roll" value="1"></div>
+    <div class="hint" style="margin:-2px 0 8px">Minimum poles &minus; zeros: the model falls off at &minus;20&times;this dB/decade at high frequency.</div>
+    <div class="row"><label>Min damping</label><input type="text" id="zmin" value="0.02"></div>
+    <div class="hint" style="margin:-2px 0 8px">Lower bound on a complex pair's damping ratio. Lower it (e.g. 0.002) only for genuinely sharp resonances.</div>
+    <label class="check"><input type="checkbox" id="dc" checked> Pin DC gain to the measured value</label>
+  </details>
+  <div class="btns"><button class="primary" id="btnFit" disabled>Fit zpk model</button></div>
+  <div id="err"></div>
+</aside>
+
+<main>
+  <div class="card" id="cardRaw">
+    <h2>Time series <small id="rawInfo"></small></h2>
+    <div class="legend" id="rawLegend"></div>
+    <div class="plot" id="pRaw"></div>
+    <div class="empty" id="emptyMsg">Choose a CSV (or try the demo data) to begin.</div>
+  </div>
+
+  <div class="card" id="cardFreq" hidden>
+    <h2>Transfer function <small id="freqInfo"></small></h2>
+    <div class="legend" id="freqLegend"></div>
+    <div class="plot tall" id="pMag"></div>
+    <div class="plot" id="pPh" style="height:190px"></div>
+  </div>
+
+  <div class="card" id="cardRes" hidden>
+    <h2>Fitted model</h2>
+    <div class="stats" id="stats"></div>
+    <div id="warns"></div>
+    <div class="chk" id="checks"></div>
+    <table id="zpk"></table>
+    <pre id="code"></pre>
+    <div class="btns" style="margin-top:0"><button id="btnCopy">Copy Python</button><button id="btnJson">Download JSON</button></div>
+  </div>
+
+  <div class="grid2" id="cardTD" hidden>
+    <div class="card"><h2>Step response check <small>model vs data</small></h2>
+      <div class="legend"><span><i style="background:var(--c-meas)"></i>measured</span><span><i style="background:var(--c-model)"></i>model</span></div>
+      <div class="plot" id="pStep"></div></div>
+    <div class="card"><h2>Error in the fit range</h2>
+      <div class="legend"><span><i style="background:var(--c-meas)"></i>magnitude, dB</span><span><i style="background:var(--c-err)"></i>phase, degrees</span></div>
+      <div class="plot" id="pErr"></div>
+      <div class="note" id="cands"></div></div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = v => v === 0 ? "0" : (Math.abs(v) >= 1e4 || Math.abs(v) < 1e-2) ? v.toExponential(2).replace(/\.?0+e/, "e").replace("e+", "e") : String(+v.toPrecision(3));
+
+/* ---------------------------------------------------------------- tiny plotter */
+class Plot {
+  constructor(el, o = {}) {
+    this.el = el; this.o = o; this.series = []; this.bands = []; this.xlim = null; this.ylim = null;
+    this.cv = document.createElement("canvas"); el.appendChild(this.cv);
+    this.tip = document.createElement("div"); this.tip.className = "tip"; el.appendChild(this.tip);
+    this.m = { l: 62, r: 14, t: 10, b: 36 };
+    this.hover = null; this.drag = null;
+    new ResizeObserver(() => this.draw()).observe(el);
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => this.draw());
+    const pos = e => { const r = this.cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    this.cv.addEventListener("mousemove", e => { const [x, y] = pos(e);
+      if (this.drag) this.drag[1] = x; this.hover = [x, y]; this.draw(); });
+    this.cv.addEventListener("mouseleave", () => { this.hover = null; this.drag = null; this.draw(); });
+    this.cv.addEventListener("mousedown", e => { if (o.onSelect) this.drag = [pos(e)[0], pos(e)[0]]; });
+    window.addEventListener("mouseup", () => {
+      if (!this.drag) return; const [a, b] = this.drag; this.drag = null;
+      if (Math.abs(a - b) > 6) o.onSelect(this.fromX(Math.min(a, b)), this.fromX(Math.max(a, b)));
+      this.draw(); });
+  }
+  set(series, { bands = [], xlim = null, ylim = null } = {}) {
+    this.series = series; this.bands = bands; this.xlim = xlim; this.ylim = ylim; this.draw();
+  }
+  tx(v) { return this.o.xlog ? Math.log10(v) : v; }
+  ty(v) { return this.o.ylog ? Math.log10(v) : v; }
+  range() {
+    let [x0, x1] = this.xlim || [Infinity, -Infinity];
+    if (!this.xlim) for (const s of this.series) for (const x of s.x) if (x != null && (!this.o.xlog || x > 0)) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); }
+    let [y0, y1] = this.ylim || [Infinity, -Infinity];
+    if (!this.ylim) for (const s of this.series) for (let i = 0; i < s.x.length; i++) {
+      const x = s.x[i], y = s.y[i];
+      if (x == null || y == null || x < x0 || x > x1 || (this.o.ylog && y <= 0)) continue;
+      y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    if (!isFinite(x0) || !isFinite(y0)) return null;
+    if (x0 === x1) { x0 -= 1; x1 += 1; }
+    if (!this.ylim) {
+      if (y0 === y1) { y0 -= 1; y1 += 1; }
+      if (this.o.ylog) { y0 /= 1.25; y1 *= 1.25; } else { const p = 0.06 * (y1 - y0); y0 -= p; y1 += p; }
+    }
+    return { x0, x1, y0, y1 };
+  }
+  W() { return this.cv.width / this.dpr - this.m.l - this.m.r; }
+  H() { return this.cv.height / this.dpr - this.m.t - this.m.b; }
+  X(v) { const r = this.R; return this.m.l + (this.tx(v) - this.tx(r.x0)) / (this.tx(r.x1) - this.tx(r.x0)) * this.W(); }
+  Y(v) { const r = this.R; return this.m.t + (1 - (this.ty(v) - this.ty(r.y0)) / (this.ty(r.y1) - this.ty(r.y0))) * this.H(); }
+  fromX(px) { const r = this.R, f = (px - this.m.l) / this.W(), a = this.tx(r.x0), b = this.tx(r.x1), v = a + f * (b - a);
+    return this.o.xlog ? 10 ** v : v; }
+  ticks(lo, hi, log) {
+    const out = [];
+    if (log) {
+      for (let e = Math.floor(Math.log10(lo)); e <= Math.ceil(Math.log10(hi)); e++)
+        for (const m of [1, 2, 5]) { const v = m * 10 ** e; if (v >= lo && v <= hi) out.push({ v, major: m === 1 }); }
+      return out;
+    }
+    const step0 = (hi - lo) / 5, mag = 10 ** Math.floor(Math.log10(step0)), err = step0 / mag;
+    const step = mag * (err > 7 ? 10 : err > 3.5 ? 5 : err > 1.5 ? 2 : 1);
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-12; v += step) out.push({ v: +v.toPrecision(12), major: true });
+    return out;
+  }
+  draw() {
+    const cv = this.cv, w = this.el.clientWidth, h = this.el.clientHeight;
+    if (!w || !h) return;
+    this.dpr = devicePixelRatio || 1;
+    cv.width = w * this.dpr; cv.height = h * this.dpr;
+    const g = cv.getContext("2d"); g.scale(this.dpr, this.dpr);
+    const text = css("--muted"), grid = css("--grid"), line = css("--line");
+    this.R = this.range();
+    g.font = "11px -apple-system, Segoe UI, sans-serif";
+    if (!this.R) { g.fillStyle = text; g.fillText("no data", this.m.l + 8, this.m.t + 18); return; }
+    const R = this.R, { l, t } = this.m, W = this.W(), H = this.H();
+    for (const b of this.bands) {                       // shaded fit range
+      const a = Math.max(this.X(Math.max(b.x0, R.x0)), l), c = Math.min(this.X(Math.min(b.x1, R.x1)), l + W);
+      if (c > a) { g.fillStyle = css("--accent-soft"); g.globalAlpha = .55; g.fillRect(a, t, c - a, H); g.globalAlpha = 1; }
+    }
+    g.textAlign = "center"; g.textBaseline = "top";
+    for (const k of this.ticks(R.x0, R.x1, this.o.xlog)) {
+      const x = this.X(k.v); g.strokeStyle = k.major ? grid : grid; g.globalAlpha = k.major ? 1 : .5;
+      g.beginPath(); g.moveTo(x, t); g.lineTo(x, t + H); g.stroke(); g.globalAlpha = 1;
+      if (k.major) { g.fillStyle = text; g.fillText(fmt(k.v), x, t + H + 5); }
+    }
+    g.textAlign = "right"; g.textBaseline = "middle";
+    for (const k of this.ticks(R.y0, R.y1, this.o.ylog)) {
+      const y = this.Y(k.v); g.strokeStyle = grid; g.globalAlpha = k.major ? 1 : .5;
+      g.beginPath(); g.moveTo(l, y); g.lineTo(l + W, y); g.stroke(); g.globalAlpha = 1;
+      if (k.major) { g.fillStyle = text; g.fillText(fmt(k.v), l - 6, y); }
+    }
+    g.strokeStyle = line; g.strokeRect(l, t, W, H);
+    g.fillStyle = text; g.textAlign = "center"; g.textBaseline = "bottom";
+    g.fillText(this.o.xlabel || "", l + W / 2, h - 2);
+    g.save(); g.translate(12, t + H / 2); g.rotate(-Math.PI / 2); g.textBaseline = "top"; g.fillText(this.o.ylabel || "", 0, 0); g.restore();
+
+    g.save(); g.beginPath(); g.rect(l, t, W, H); g.clip();
+    for (const s of this.series) {
+      g.strokeStyle = g.fillStyle = css(s.color); g.lineWidth = s.width || 1.6; g.setLineDash(s.dash || []);
+      g.globalAlpha = s.alpha ?? 1; g.beginPath(); let pen = false;
+      for (let i = 0; i < s.x.length; i++) {
+        const x = s.x[i], y = s.y[i];
+        if (x == null || y == null || (this.o.xlog && x <= 0) || (this.o.ylog && y <= 0)) { pen = false; continue; }
+        const px = this.X(x), py = this.Y(y);
+        if (s.dots) { g.fillRect(px - 1.2, py - 1.2, 2.4, 2.4); continue; }
+        if (pen) g.lineTo(px, py); else g.moveTo(px, py); pen = true;
+      }
+      if (!s.dots) g.stroke();
+      g.globalAlpha = 1;
+    }
+    g.setLineDash([]); g.restore();
+
+    if (this.drag) {
+      g.fillStyle = css("--accent"); g.globalAlpha = .18;
+      g.fillRect(Math.min(...this.drag), t, Math.abs(this.drag[1] - this.drag[0]), H); g.globalAlpha = 1;
+    }
+    const hv = this.hover;
+    if (hv && hv[0] >= l && hv[0] <= l + W && hv[1] >= t && hv[1] <= t + H) {
+      g.strokeStyle = text; g.globalAlpha = .5; g.beginPath(); g.moveTo(hv[0], t); g.lineTo(hv[0], t + H); g.stroke(); g.globalAlpha = 1;
+      const xv = this.fromX(hv[0]), lines = [`${this.o.xname || "x"} = ${fmt(xv)}`];
+      for (const s of this.series) {
+        if (s.hide) continue;
+        let lo = 0, hi = s.x.length - 1;
+        while (hi - lo > 1) { const mid = (lo + hi) >> 1; (s.x[mid] ?? Infinity) < xv ? lo = mid : hi = mid; }
+        const i = Math.abs((s.x[lo] ?? Infinity) - xv) < Math.abs((s.x[hi] ?? Infinity) - xv) ? lo : hi;
+        if (s.y[i] != null) lines.push(`${s.label}: ${fmt(s.y[i])}`);
+      }
+      this.tip.textContent = lines.join("\n"); this.tip.style.display = "block";
+      const tw = this.tip.offsetWidth; this.tip.style.left = Math.min(hv[0] + 12, w - tw - 4) + "px"; this.tip.style.top = (hv[1] + 12) + "px";
+    } else this.tip.style.display = "none";
+  }
+}
+
+/* ----------------------------------------------------------------------- state */
+const S = { id: null, name: "", cols: [], an: null, fit: null, rangeSet: false };
+const pRaw = new Plot($("pRaw"), { xlabel: "time since step [s]", ylabel: "amplitude", xname: "t" });
+const pMag = new Plot($("pMag"), { xlog: true, ylog: true, xlabel: "", ylabel: "|H| (output / input units)", xname: "f [Hz]",
+  onSelect: (a, b) => { $("fLo").value = (+a.toPrecision(3)).toString(); $("fHi").value = (+b.toPrecision(3)).toString(); redrawFreq(); } });
+const pPh = new Plot($("pPh"), { xlog: true, xlabel: "frequency [Hz]", ylabel: "phase [deg]", xname: "f [Hz]" });
+const pStep = new Plot($("pStep"), { xlabel: "time since step [s]", ylabel: "output", xname: "t" });
+const pErr = new Plot($("pErr"), { xlog: true, xlabel: "frequency [Hz]", ylabel: "error", xname: "f [Hz]" });
+
+const num = id => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
+const showErr = m => { $("err").textContent = m || ""; };
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: "POST", body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const busy = (btn, on, label) => { btn.disabled = on; if (label) btn.dataset.l = btn.dataset.l || btn.textContent; btn.textContent = on ? label : btn.dataset.l || btn.textContent; };
+
+/* ---------------------------------------------------------------------- import */
+async function loadText(name, text) {
+  showErr("");
+  try {
+    const j = await api("/api/parse", { name, text });
+    S.id = j.id; S.cols = j.columns; S.an = S.fit = null; S.rangeSet = false;
+    $("fname").textContent = `${name || "data"}: ${j.rows} rows, ${j.columns.length} columns`;
+    const opts = (none) => (none ? `<option value="">${none}</option>` : "") +
+      j.columns.map((c, i) => `<option value="${i}" ${c.usable ? "" : "disabled"}>${c.name}${c.usable ? "" : " (not numeric)"}</option>`).join("");
+    $("selT").innerHTML = opts("— none: use sample step —");
+    $("selU").innerHTML = opts("— none: assume unit step —");
+    $("selY").innerHTML = opts("");
+    const g = j.guess;
+    $("selT").value = g.time ?? ""; $("selU").value = g.input ?? ""; $("selY").value = g.output ?? "";
+    syncTime(); $("btnAnalyze").disabled = false; $("btnFit").disabled = true;
+    $("cardFreq").hidden = $("cardRes").hidden = $("cardTD").hidden = true;
+    $("emptyMsg").hidden = false; $("rawInfo").textContent = "";
+    pRaw.set([]); $("rawLegend").innerHTML = "";
+    if (g.output != null) analyze();
+  } catch (e) { showErr(e.message); }
+}
+$("btnFile").onclick = () => $("file").click();
+$("file").onchange = async e => { const f = e.target.files[0]; if (f) loadText(f.name, await f.text()); e.target.value = ""; };
+$("btnDemo").onclick = async () => { const d = await api("/api/demo"); loadText(d.name, d.text); };
+const syncTime = () => { $("rowDt").hidden = $("selT").value !== ""; };
+$("selT").onchange = syncTime;
+const idx = id => { const v = $(id).value; return v === "" ? null : Number(v); };
+
+/* -------------------------------------------------------------------- analysis */
+async function analyze() {
+  showErr(""); busy($("btnAnalyze"), true, "Working…");
+  try {
+    const a = await api("/api/analyze", { id: S.id, time: idx("selT"), input: idx("selU"), output: idx("selY"),
+      dt: $("dt").value, mode: $("mode").value, amplitude: $("amp").value, step_time: $("stepT").value });
+    S.an = a; S.fit = null;
+    const sg = a.suggest;
+    if (!S.rangeSet) { S.rangeSet = true; $("fLo").value = (+sg.f_lo.toPrecision(3)).toString(); $("fHi").value = (+sg.f_hi.toPrecision(3)).toString(); }
+    drawRaw(); redrawFreq();
+    $("cardFreq").hidden = false; $("cardRes").hidden = $("cardTD").hidden = true; $("emptyMsg").hidden = true;
+    $("btnFit").disabled = false;
+  } catch (e) { showErr(e.message); }
+  busy($("btnAnalyze"), false);
+}
+$("btnAnalyze").onclick = analyze;
+
+function drawRaw() {
+  const a = S.an, i = a.info, s = a.series, ser = [{ x: s.t, y: s.y, color: "--c-meas", label: "output", width: 1.4 }];
+  const leg = [`<span><i style="background:var(--c-meas)"></i>output (baseline removed)</span>`];
+  if (s.u) { ser.push({ x: s.t, y: s.u.map(v => v == null ? null : v * i.dc_gain), color: "--c-in", label: "input × DC gain", width: 1.2, alpha: .8 });
+    leg.push(`<span><i style="background:var(--c-in)"></i>input × DC gain</span>`); }
+  pRaw.set(ser); $("rawLegend").innerHTML = leg.join("");
+  $("rawInfo").textContent = `step ${fmt(i.amplitude)} at t=${fmt(i.t0)} s · DC gain ${fmt(i.dc_gain)} · noise σ ${fmt(i.sigma_y)} · ${i.n_samples} samples`;
+  $("rawNotes")?.remove();
+  if (i.notes.length) { const d = document.createElement("div"); d.id = "rawNotes"; d.innerHTML = i.notes.map(n => `<div class="warn">${n}</div>`).join(""); $("cardRaw").appendChild(d); }
+}
+
+function redrawFreq() {
+  const a = S.an; if (!a) return;
+  const r = a.response, lo = num("fLo"), hi = num("fHi"), f = S.fit;
+  const bands = lo && hi && hi > lo ? [{ x0: lo, x1: hi }] : [];
+  const xlim = [Math.min(r.f[0], lo || Infinity) / 30, Math.max(r.f[r.f.length - 1], hi || 0) * 30];
+  const meas = { x: r.f, y: r.mag, color: "--c-meas", label: "measured", width: 1.6 };
+  const noise = { x: r.f, y: r.noise.map(v => v == null ? null : 3 * v), color: "--c-noise", label: "3σ noise", dash: [5, 4], width: 1.2 };
+  const ph = { x: r.f, y: r.phase, color: "--c-meas", label: "measured", width: 1.6 };
+  const mS = [meas, noise], pS = [ph];
+  const leg = [`<span><i style="background:var(--c-meas)"></i>measured</span>`, `<span><i style="background:var(--c-noise)"></i>3σ noise floor</span>`];
+  if (f) { mS.push({ x: f.curve.f, y: f.curve.mag, color: "--c-model", label: "model", width: 2.2 });
+    pS.push({ x: f.curve.f, y: f.curve.phase, color: "--c-model", label: "model", width: 2.2 });
+    leg.push(`<span><i style="background:var(--c-model)"></i>zpk model (shown beyond the data to check roll-off)</span>`); }
+  pMag.set(mS, { bands, xlim }); pPh.set(pS, { bands, xlim });
+  $("freqLegend").innerHTML = leg.join("");
+  $("freqInfo").textContent = `${fmt(r.f[0])}–${fmt(r.f[r.f.length - 1])} Hz available · Nyquist ${fmt(a.info.fnyq)} Hz`;
+}
+$("fLo").oninput = $("fHi").oninput = redrawFreq;
+
+/* ------------------------------------------------------------------------- fit */
+async function runFit() {
+  showErr(""); busy($("btnFit"), true, "Fitting…");
+  try {
+    const f = await api("/api/fit", { id: S.id, f_lo: num("fLo"), f_hi: num("fHi"),
+      n_poles: $("nP").value.trim() || null, n_zeros: $("nZ").value.trim() || null,
+      max_poles: num("maxP") ?? 6, guard: num("guard") ?? 10, rolloff: num("roll") ?? 1, match_dc: $("dc").checked, min_damping: num("zmin") ?? 0.02 });
+    S.fit = f; drawFit();
+  } catch (e) { showErr(e.message); }
+  busy($("btnFit"), false);
+}
+$("btnFit").onclick = runFit;
+
+const hz = r => r.im === 0 || Math.abs(r.im) < 1e-9 * Math.abs(r.re) ? fmt(r.re) : `${fmt(r.re)} ${r.im < 0 ? "−" : "+"} ${fmt(Math.abs(r.im))}j`;
+function drawFit() {
+  const f = S.fit, m = f.model, c = f.checks; redrawFreq();
+  $("cardRes").hidden = $("cardTD").hidden = false;
+  const stat = (v, l) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`;
+  $("stats").innerHTML = stat(`${f.order.poles} / ${f.order.zeros}`, "poles / zeros") +
+    stat(`${fmt(f.error.rms_db)} dB`, "rms magnitude error") + stat(`${fmt(f.error.rms_deg)}°`, "rms phase error") +
+    stat(fmt(m.dc_gain), "DC gain") + stat(`${c.hf_slope_db_per_decade} dB/dec`, "high-frequency slope");
+  $("warns").innerHTML = f.warnings.map(w => `<div class="warn">${w}</div>`).join("");
+  const yn = (ok, t) => `<div><span class="${ok ? "ok" : "bad"}">${ok ? "✓" : "✗"}</span> ${t}</div>`;
+  $("checks").innerHTML = yn(c.stable, "all poles in the left half-plane (stable)") +
+    yn(c.minimum_phase, "all zeros in the left half-plane (invertible)") +
+    yn(c.roots_inside_guard_band, `roots within ${fmt(c.lowest_root_hz)}–${fmt(c.highest_root_hz)} Hz (inside the guard band)`) +
+    yn(c.relative_degree >= 1, `strictly proper: relative degree ${c.relative_degree}`) +
+    yn(c.peak_outside_fit_vs_inside <= 1.05, `gain outside the fit range ≤ ${fmt(c.peak_outside_fit_vs_inside)}× the in-band maximum`);
+  const rows = (rs, kind) => rs.map((r, i) => `<tr><td>${kind} ${i + 1}</td><td class="n">${hz(r)}</td><td class="n">${hz(m[kind === "pole" ? "poles_hz" : "zeros_hz"][i])}</td></tr>`).join("");
+  $("zpk").innerHTML = `<tr><th></th><th>rad/s</th><th>Hz</th></tr>` + rows(m.zeros_rad, "zero") + rows(m.poles_rad, "pole") +
+    `<tr><td>gain k</td><td class="n" colspan="2">${m.gain.toPrecision(6)}</td></tr>`;
+  $("code").textContent = f.python;
+  const r = f.residual;
+  pErr.set([{ x: r.f, y: r.db, color: "--c-meas", label: "dB", width: 1.4 }, { x: r.f, y: r.deg, color: "--c-err", label: "deg", width: 1.4 }]);
+  pStep.set([{ x: f.step.t, y: f.step.measured, color: "--c-meas", label: "measured", width: 1.3, alpha: .85 },
+             { x: f.step.t, y: f.step.model, color: "--c-model", label: "model", width: 2 }]);
+  $("cands").textContent = "Orders tried (poles/zeros → rms log error): " +
+    f.candidates.map(k => `${k.n_poles}/${k.n_zeros} → ${k.cost.toFixed(3)}`).join(" · ");
+  $("cardRes").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+$("btnCopy").onclick = async () => { await navigator.clipboard.writeText(S.fit.python); $("btnCopy").textContent = "Copied"; setTimeout(() => $("btnCopy").textContent = "Copy Python", 1200); };
+$("btnJson").onclick = () => {
+  const blob = new Blob([JSON.stringify({ model: S.fit.model, order: S.fit.order, error: S.fit.error, checks: S.fit.checks }, null, 2)], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "zpk_model.json"; a.click(); URL.revokeObjectURL(a.href);
+};
+</script>
+</body>
+</html>

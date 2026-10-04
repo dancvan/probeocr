@@ -9,3 +9,6 @@ follow the window even if it moves.
 - Windows: every push builds a self-contained zip and tests it. Download it from the
   latest run under **Actions → probeocr Windows bundle → Artifacts → probeocr-win64.zip**.
 - `roi_ocr.cpp` / `CMakeLists.txt`: the earlier C++/OpenCV prototype, kept for reference.
+- [`stepfit/`](stepfit/): import a step-response CSV, pick the input and output columns, and fit a
+  stable zpk model over a chosen frequency range (Python, numpy/scipy; web UI and CLI).
+  **Start with [stepfit/README.md](stepfit/README.md).**
