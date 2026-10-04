@@ -11,7 +11,7 @@ jobs:
   bundle:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: msys2/setup-msys2@v2
         with:
@@ -31,7 +31,9 @@ jobs:
           & "$b\python\python.exe" "$b\tools\smoke_test.py" $b
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
-      - uses: actions/upload-artifact@v4
+      # The bundle is already a zip, so upload it as-is rather than zipping it
+      # again; the artifact is named after the file (probeocr-win64.zip).
+      - uses: actions/upload-artifact@v7
         with:
-          name: probeocr-win64
           path: probeocr/dist/probeocr-win64.zip
+          archive: false

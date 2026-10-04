@@ -7,5 +7,5 @@ follow the window even if it moves.
 - [`probeocr/`](probeocr/): the tool itself (C core, Python web frontend, samples,
   smoke test). **Start with [probeocr/README.md](probeocr/README.md).**
 - Windows: every push builds a self-contained zip and tests it. Download it from the
-  latest run under **Actions → probeocr Windows bundle → Artifacts**.
+  latest run under **Actions → probeocr Windows bundle → Artifacts → probeocr-win64.zip**.
 - `roi_ocr.cpp` / `CMakeLists.txt`: the earlier C++/OpenCV prototype, kept for reference.
