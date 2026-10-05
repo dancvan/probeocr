@@ -17,18 +17,34 @@ jobs:
         with:
           msystem: UCRT64
           update: true
-          install: make zip unzip
-          pacboy: gcc:p pkgconf:p tesseract-ocr:p leptonica:p
+          install: make zip
+          pacboy: gcc:p pkgconf:p tesseract-ocr:p leptonica:p raylib:p mesa:p
 
       - name: Build bundle
         shell: msys2 {0}
         run: bash probeocr/packaging/windows/bundle.sh
 
-      - name: Smoke test the bundle with its own Python, outside MSYS2
+      # CLI on all samples (incl. a Unicode folder) + the GUI starts with only bundled DLLs
+      - name: Smoke test the bundle outside MSYS2
         shell: pwsh
         run: |
           $b = "probeocr\dist\probeocr-win64"
-          & "$b\python\python.exe" "$b\tools\smoke_test.py" $b
+          python "$b\tools\smoke_test.py" $b
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      # The runner has no GPU, so drive the GUI's interactive self-test on Mesa's
+      # software OpenGL. Mesa is copied into a scratch copy only, never the bundle.
+      - name: GUI self-test (software OpenGL)
+        shell: pwsh
+        env:
+          GALLIUM_DRIVER: llvmpipe
+        run: |
+          $t = "$env:RUNNER_TEMP\guitest"
+          Copy-Item -Recurse "probeocr\dist\probeocr-win64" $t
+          $mesa = "$env:RUNNER_TEMP\msys64\ucrt64\bin"
+          Get-ChildItem $mesa -Filter "opengl32.dll" | Copy-Item -Destination "$t\bin"
+          Get-ChildItem $mesa -Filter "libgallium_wgl.dll" | Copy-Item -Destination "$t\bin"
+          python "$t\tools\smoke_test.py" --gui $t
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       # The bundle is already a zip, so upload it as-is rather than zipping it
