@@ -111,7 +111,9 @@ static void clay_error(Clay_ErrorData e) {
 
 void ui_init(int width, int height) {
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_HIGHDPI | FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
-    SetTraceLogLevel(LOG_WARNING);
+    /* PROBEOCR_LOG=info shows raylib's startup log (OpenGL driver etc.) */
+    const char *log = getenv("PROBEOCR_LOG");
+    SetTraceLogLevel(log && !strcmp(log, "info") ? LOG_INFO : LOG_WARNING);
     InitWindow(width, height, "Probe OCR");
     /* Never open taller/wider than the display: the OS would shrink the window
        behind raylib's back and the top of the layout would be cut off. */

@@ -113,8 +113,11 @@ def check_gui(work):
     lines = [l for l in proc.stdout.splitlines() if l.startswith("  ") and ("ok" in l[:8] or "FAIL" in l[:8])]
     for l in lines:
         print("  GUI" + l[1:])
-    check(proc.returncode == 0 and "PASS" in proc.stdout,
-          f"GUI self-test from a Unicode folder ({len(lines)} checks)" + (f" — {proc.stderr.strip()[-300:]}" if proc.returncode else ""))
+    ok = proc.returncode == 0 and "PASS" in proc.stdout
+    check(ok, f"GUI self-test from a Unicode folder ({len(lines)} checks, exit {proc.returncode})")
+    if not ok:   # show why, e.g. raylib failing to create an OpenGL context
+        for l in (proc.stdout + proc.stderr).strip().splitlines()[-25:]:
+            print("        | " + l)
 
 
 def main():

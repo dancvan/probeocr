@@ -18,15 +18,29 @@ static int g_nq, g_now, g_step, g_wait, g_fail;
 static const char *g_dir, *g_png;
 static float g_saved_scale, g_saved_px, g_saved_py;
 static Vector2 g_saved_pt, g_saved_center;
+static Vector2 g_ptr = { 10, 10 };   /* the test's pointer; real mouse input is overridden */
+static bool g_btn;
 
 /* Queue an event `off` frames after the next one (this frame's events have already played). */
 static void at(int off, int type, int a, int b) {
     if (g_nq < 256) g_q[g_nq++] = (QEv){ g_now + 1 + off, type, a, b };
 }
+/* Re-assert the pointer every frame: real mouse movement over the window
+   would otherwise overwrite the injected position mid-gesture. */
+static void pos(int off, Vector2 p) { at(off, EV_MPOS, (int)p.x, (int)p.y); }
 static void click(int off, Vector2 p) {
-    at(off, EV_MPOS, (int)p.x, (int)p.y);
-    at(off + 1, EV_MB_DOWN, 0, 0);
-    at(off + 2, EV_MB_UP, 0, 0);
+    pos(off, p);
+    pos(off + 1, p); at(off + 1, EV_MB_DOWN, 0, 0);
+    pos(off + 2, p); at(off + 2, EV_MB_UP, 0, 0);
+}
+/* press at a, move through the midpoint to b, release */
+static void drag(int off, Vector2 a, Vector2 b) {
+    Vector2 m = { (a.x + b.x) / 2, (a.y + b.y) / 2 };
+    pos(off, a);
+    pos(off + 1, a); at(off + 1, EV_MB_DOWN, 0, 0);
+    pos(off + 2, m);
+    pos(off + 3, b);
+    pos(off + 4, b); at(off + 4, EV_MB_UP, 0, 0);
 }
 static void key(int off, int k) { at(off, EV_KEY_DOWN, k, 0); at(off + 1, EV_KEY_UP, k, 0); }
 static Vector2 center(Clay_ElementId id) {
@@ -97,14 +111,29 @@ static int batch_check(void) {
 /* Call once per frame before input is read. Returns -1 while running, else the exit code. */
 int selftest_frame(void) {
     g_now++;
+    bool wheel = false;
     for (int i = 0; i < g_nq; i++) {
         if (g_q[i].frame != g_now) continue;
-        AutomationEvent e = { 0 };
-        e.type = (unsigned)g_q[i].type;
-        e.params[0] = g_q[i].a;
-        e.params[1] = g_q[i].b;
-        PlayAutomationEvent(e);
+        switch (g_q[i].type) {
+        case EV_MPOS: g_ptr = (Vector2){ (float)g_q[i].a, (float)g_q[i].b }; break;
+        case EV_MB_DOWN: g_btn = true; break;
+        case EV_MB_UP: g_btn = false; break;
+        case EV_WHEEL: wheel = true; /* fall through */
+        default: {
+            AutomationEvent e = { 0 };
+            e.type = (unsigned)g_q[i].type;
+            e.params[0] = g_q[i].a;
+            e.params[1] = g_q[i].b;
+            PlayAutomationEvent(e);
+        }
+        }
     }
+    /* Own the mouse completely while testing, so someone using the computer
+       (moving, scrolling, clicking over the window) can't disturb the run. */
+    PlayAutomationEvent((AutomationEvent){ .type = EV_MPOS, .params = { (int)g_ptr.x, (int)g_ptr.y } });
+    PlayAutomationEvent((AutomationEvent){ .type = g_btn ? EV_MB_DOWN : EV_MB_UP, .params = { MOUSE_BUTTON_LEFT } });
+    PlayAutomationEvent((AutomationEvent){ .type = EV_MB_UP, .params = { MOUSE_BUTTON_MIDDLE } });
+    if (!wheel) PlayAutomationEvent((AutomationEvent){ .type = EV_WHEEL, .params = { 0, 0 } });
     if (g_wait > 0) { g_wait--; return -1; }
     g_nq = 0;
 
@@ -173,10 +202,10 @@ int selftest_frame(void) {
         g_saved_scale = canvas_scale();
         g_saved_center = cc;
         g_saved_pt = canvas_screen_to_img(cc);
-        at(0, EV_MPOS, (int)cc.x, (int)cc.y);
+        pos(0, cc);
         at(0, EV_KEY_DOWN, KEY_LEFT_CONTROL, 0);
-        at(1, EV_WHEEL, 0, 3);
-        at(2, EV_KEY_UP, KEY_LEFT_CONTROL, 0);
+        pos(1, cc); at(1, EV_WHEEL, 0, 3);
+        pos(2, cc); at(2, EV_KEY_UP, KEY_LEFT_CONTROL, 0);
         g_wait = 4;
         break;
     case 9: {
@@ -186,11 +215,8 @@ int selftest_frame(void) {
         check(fabsf(p.x - g_saved_pt.x) < 1 && fabsf(p.y - g_saved_pt.y) < 1, "zoom keeps the point under the cursor fixed");
         canvas_pan(&g_saved_px, &g_saved_py);
         at(0, EV_KEY_DOWN, KEY_SPACE, 0);
-        at(0, EV_MPOS, (int)cc.x, (int)cc.y);
-        at(1, EV_MB_DOWN, 0, 0);
-        at(2, EV_MPOS, (int)cc.x + 40, (int)cc.y + 30);
-        at(3, EV_MB_UP, 0, 0);
-        at(4, EV_KEY_UP, KEY_SPACE, 0);
+        drag(0, cc, (Vector2){ cc.x + 40, cc.y + 30 });
+        at(5, EV_KEY_UP, KEY_SPACE, 0);
         g_wait = 6;
         break;
     }
@@ -209,12 +235,7 @@ int selftest_frame(void) {
         check(canvas_scale() < g_saved_scale * 1.01f, "0 fits the image again");
         check(A.cur == 0, "back on shot_000");
         /* draw a box around the "CH1" caption of shot_000 */
-        Vector2 a = canvas_img_to_screen(104, 86), b = canvas_img_to_screen(162, 122);
-        at(0, EV_MPOS, (int)a.x, (int)a.y);
-        at(1, EV_MB_DOWN, 0, 0);
-        at(2, EV_MPOS, (int)((a.x + b.x) / 2), (int)((a.y + b.y) / 2));
-        at(3, EV_MPOS, (int)b.x, (int)b.y);
-        at(4, EV_MB_UP, 0, 0);
+        drag(0, canvas_img_to_screen(104, 86), canvas_img_to_screen(162, 122));
         g_wait = 6;
         break;
     }

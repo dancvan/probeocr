@@ -33,17 +33,25 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       # The runner has no GPU, so drive the GUI's interactive self-test on Mesa's
-      # software OpenGL. Mesa is copied into a scratch copy only, never the bundle.
+      # software OpenGL. Mesa (and the DLLs it needs) go into a scratch copy only,
+      # never the bundle.
+      - name: Add Mesa to a scratch copy of the bundle
+        shell: msys2 {0}
+        run: |
+          t="$(cygpath -u "$RUNNER_TEMP")/guitest"
+          cp -r probeocr/dist/probeocr-win64 "$t"
+          cp /ucrt64/bin/opengl32.dll /ucrt64/bin/libgallium_wgl.dll "$t/bin/"
+          ldd /ucrt64/bin/opengl32.dll /ucrt64/bin/libgallium_wgl.dll | awk '$3 ~ /^\/ucrt64\// {print $3}' \
+              | sort -u | xargs -r cp -n -t "$t/bin/"
+          ls "$t/bin"
+
       - name: GUI self-test (software OpenGL)
         shell: pwsh
         env:
           GALLIUM_DRIVER: llvmpipe
+          PROBEOCR_LOG: info
         run: |
           $t = "$env:RUNNER_TEMP\guitest"
-          Copy-Item -Recurse "probeocr\dist\probeocr-win64" $t
-          $mesa = "$env:RUNNER_TEMP\msys64\ucrt64\bin"
-          Get-ChildItem $mesa -Filter "opengl32.dll" | Copy-Item -Destination "$t\bin"
-          Get-ChildItem $mesa -Filter "libgallium_wgl.dll" | Copy-Item -Destination "$t\bin"
           python "$t\tools\smoke_test.py" --gui $t
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
